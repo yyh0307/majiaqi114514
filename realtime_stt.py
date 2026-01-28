@@ -1,0 +1,78 @@
+import whisper
+import sounddevice as sd
+import numpy as np
+import threading
+import queue
+
+# ===================== 核心配置（极简） =====================
+SAMPLING_RATE = 16000  # Whisper固定要求16000采样率
+CHUNK_DURATION = 1     # 每2秒转写一次（可调，越小越实时）
+MODEL = "small"         # 模型大小：tiny(最快)/base(平衡)/small(更准)
+LANGUAGE = "zh"        # 指定中文转写，提升准确率
+
+# ===================== 初始化 =====================
+# 加载模型（首次运行自动下载到本地，路径：~/.cache/whisper）
+model = whisper.load_model(MODEL, device="cpu")  # 强制CPU，避免GPU依赖
+# 音频队列：存储采集的音频数据
+audio_queue = queue.Queue()
+
+# ===================== 音频采集回调 =====================
+def collect_audio(indata, frames, time, status):
+    """麦克风采集回调，直接存原始音频数据"""
+    if status:
+        print(f"采集提示：{status}", flush=True)
+    # 转换为Whisper要求的格式（单声道、float32）
+    audio_data = indata[:, 0].astype(np.float32)
+    audio_queue.put(audio_data)
+
+# ===================== 实时转写线程 =====================
+def transcribe_real_time():
+    """持续从队列取音频并转写，无ffmpeg依赖"""
+    print(f"✅ 开始实时转写（{CHUNK_DURATION}秒/段），按Ctrl+C停止...")
+    while True:
+        # 收集指定时长的音频数据
+        audio_chunks = []
+        target_frames = int(SAMPLING_RATE * CHUNK_DURATION)  # 目标总帧数
+        collected_frames = 0
+        
+        while collected_frames < target_frames:
+            try:
+                chunk = audio_queue.get(timeout=1)
+                audio_chunks.append(chunk)
+                collected_frames += len(chunk)
+            except queue.Empty:
+                break
+        
+        # 转写有效音频
+        if audio_chunks:
+            # 拼接并归一化（Whisper必需步骤）
+            audio = np.concatenate(audio_chunks)
+            audio = audio / np.max(np.abs(audio)) if np.max(np.abs(audio)) > 0 else audio
+            
+            # 核心转写：直接处理原始音频数组，无需ffmpeg解码
+            result = model.transcribe(
+                audio,
+                language=LANGUAGE,
+                fp16=False,  # 关闭半精度，适配CPU
+                verbose=False  # 关闭冗余日志
+            )
+            if result["text"].strip():
+                print(f"📝 转写结果：{result['text']}")
+
+# ===================== 启动程序 =====================
+if __name__ == "__main__":
+    # 启动转写线程
+    transcribe_thread = threading.Thread(target=transcribe_real_time, daemon=True)
+    transcribe_thread.start()
+    
+    # 启动麦克风采集（直接连接硬件驱动，无中间文件）
+    with sd.InputStream(
+        samplerate=SAMPLING_RATE,
+        channels=1,  # 单声道
+        callback=collect_audio,
+        blocksize=1024  # 采集块大小，适配硬件
+    ):
+        try:
+            input()  # 阻塞主线程，保持程序运行
+        except KeyboardInterrupt:
+            print("\n🛑 转写已停止")
