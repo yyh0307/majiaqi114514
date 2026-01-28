@@ -1,1 +1,242 @@
-Win the prize
+ 校园安全卫士完整方案
+1. 项目目标
+核心功能：实现打架动作识别和音频辅助识别
+辅助功能：实现关键词"校园安全"触发的人机语音互动
+报警功能：实现本地蜂鸣器和LED灯报警提示
+离线运行：完全脱离网络和笔记本电脑，独立运行
+2. 技术架构
+硬件层：树莓派3B+、USB麦克风、USB摄像头、无源蜂鸣器、LED灯
+软件层：Raspberry Pi OS Lite、Python 3.8、OpenCV、YOLOv8、vosk
+模型层：自定义打架动作识别模型、自定义关键词识别模型
+应用层：打架动作识别模块、音频辅助识别模块、报警提示模块
+🛠️ 硬件清单及优化建议
+设备名称	具体型号	信号参数	价格（元）	功能描述	优化建议
+树莓派	Raspberry Pi 3B+	处理器：Broadcom BCM2837B0四核ARM Cortex-A53 @ 1.4GHz
+内存：1GB LPDDR2 SDRAM
+存储：Micro SD卡插槽
+网络：2.4GHz Wi-Fi、千兆以太网
+接口：4个USB 2.0、HDMI 1.4、GPIO拓展接口	199	系统主机，运行所有程序	可在闲鱼、转转等平台购买二手树莓派3B+（约150元）
+麦克风	USB麦克风	采样率：16kHz
+接口：USB	20	采集语音信号，辅助识别打架声音	可使用手机耳机的麦克风替代USB麦克风（节省20元）
+摄像头	USB摄像头	分辨率：640×480像素
+接口：USB	50	采集视频帧，用于打架动作识别	可使用闲置的旧手机摄像头替代USB摄像头（节省50元）
+蜂鸣器	无源蜂鸣器模块	工作电压：3.3V/5V
+发声方式：无源，需要驱动
+接口：GPIO拓展接口	5	本地报警提示，当检测到打架时触发	可使用无源蜂鸣器替代有源蜂鸣器（节省5元）
+LED警示灯	红色LED模块	工作电压：3.3V/5V
+发光颜色：红色
+接口：GPIO拓展接口	5	本地报警提示，当检测到打架时触发	可使用普通LED灯替代LED模块（节省5元）
+电源	树莓派官方电源	输出电压：5V/2.5A
+接口：Micro USB	20	为树莓派供电	可使用手机充电器替代树莓派官方电源（节省20元）
+存储	16GB Micro SD卡	容量：16GB
+速度：UHS-I Class 10	20	存储系统和数据	可使用闲置的Micro SD卡替代（节省20元）
+总计			319		优化后最低成本约150元
+🚀 核心功能实现方案
+1. 打架动作识别模块
+技术选型：USB摄像头+YOLOv8目标检测模型+自定义打架动作识别模型
+功能描述：实现打架动作的实时识别和报警
+实现逻辑：
+在树莓派上安装OpenCV和YOLOv8库
+采集打架动作视频数据，使用YOLOv8训练自定义打架动作识别模型
+将训练好的模型传输到树莓派本地
+通过USB摄像头实时采集视频帧，使用YOLOv8目标检测模型检测人体
+使用自定义打架动作识别模型分析人体动作，判断是否存在打架行为
+检测到打架行为时，触发本地蜂鸣器和LED灯报警
+2. 音频辅助识别模块
+技术选型：USB麦克风+vosk离线语音识别库
+功能描述：实现打架声音的实时识别和报警
+实现逻辑：
+在树莓派上安装vosk离线语音识别库
+采集打架声音数据，使用vosk训练自定义打架声音识别模型
+将训练好的模型传输到树莓派本地
+通过USB麦克风实时采集音频数据，使用vosk离线识别打架声音
+检测到打架声音时，触发本地蜂鸣器和LED灯报警
+3. 关键词语音互动模块
+技术选型：USB麦克风+vosk离线语音识别库
+功能描述：实现关键词"校园安全"触发的人机语音互动
+实现逻辑：
+在树莓派上安装vosk离线语音识别库
+采集关键词"校园安全"的语音数据，使用vosk训练自定义关键词识别模型
+将训练好的模型传输到树莓派本地
+通过USB麦克风实时采集音频数据，使用vosk离线识别关键词
+检测到关键词时，触发本地蜂鸣器和LED灯报警
+核心功能实现代码示例
+1. 打架动作识别模块代码
+python
+复制
+import cv2
+import numpy as np
+from ultralytics import YOLO
+import RPi.GPIO as GPIO
+import time
+
+# ===================== 核心配置 =====================
+MODEL_PATH = "/home/pi/yolov8n-fight.pt"  # 自定义打架动作识别模型路径
+CONFIDENCE_THRESHOLD = 0.5  # 置信度阈值
+BUZZER_PIN = 18  # 蜂鸣器GPIO引脚
+LED_PIN = 23  # LEDGPIO引脚
+
+# ===================== 初始化 =====================
+# 初始化GPIO
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(BUZZER_PIN, GPIO.OUT)
+GPIO.setup(LED_PIN, GPIO.OUT)
+# 加载模型
+model = YOLO(MODEL_PATH)
+# 初始化摄像头
+cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+# ===================== 打架动作识别函数 =====================
+def detect_fight():
+    """实时检测打架动作"""
+    print(f"✅ 开始打架动作识别，按Ctrl+C停止...")
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        # 模型推理
+        results = model(frame)
+        # 解析结果
+        for result in results:
+            boxes = result.boxes
+            for box in boxes:
+                if box.conf[0] > CONFIDENCE_THRESHOLD:
+                    print(f"🔍 检测到打架动作，置信度：{box.conf[0]:.2f}")
+                    # 触发报警
+                    GPIO.output(BUZZER_PIN, GPIO.HIGH)
+                    GPIO.output(LED_PIN, GPIO.HIGH)
+                    time.sleep(2)
+                    GPIO.output(BUZZER_PIN, GPIO.LOW)
+                    GPIO.output(LED_PIN, GPIO.LOW)
+        time.sleep(0.1)
+
+# ===================== 启动程序 =====================
+if __name__ == "__main__":
+    try:
+        detect_fight()
+    except KeyboardInterrupt:
+        print("\n🛑 打架动作识别已停止")
+    except Exception as e:
+        print(f"❌ 程序出错：{e}")
+    finally:
+        # 清理资源
+        cap.release()
+        GPIO.cleanup()
+2. 音频辅助识别模块代码
+python
+复制
+from vosk import Model, KaldiRecognizer
+import pyaudio
+import json
+import RPi.GPIO as GPIO
+import time
+
+# ===================== 核心配置 =====================
+SAMPLING_RATE = 16000  # 采样率
+MODEL_PATH = "/home/pi/vosk-fight-sound"  # 自定义打架声音识别模型路径
+CONFIDENCE_THRESHOLD = 0.5  # 置信度阈值
+BUZZER_PIN = 18  # 蜂鸣器GPIO引脚
+LED_PIN = 23  # LEDGPIO引脚
+
+# ===================== 初始化 =====================
+# 初始化GPIO
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(BUZZER_PIN, GPIO.OUT)
+GPIO.setup(LED_PIN, GPIO.OUT)
+# 加载模型
+model = Model(MODEL_PATH)
+rec = KaldiRecognizer(model, SAMPLING_RATE)
+# 初始化音频流
+p = pyaudio.PyAudio()
+stream = p.open(format=pyaudio.paInt16, channels=1, rate=SAMPLING_RATE, input=True, frames_per_buffer=8000)
+
+# ===================== 打架声音识别函数 =====================
+def detect_fight_sound():
+    """实时检测打架声音"""
+    print(f"✅ 开始打架声音识别，按Ctrl+C停止...")
+    while True:
+        data = stream.read(4000)
+        if rec.AcceptWaveform(data):
+            result = json.loads(rec.Result())
+            if result["text"].strip():
+                print(f"📝 识别结果：{result['text']}")
+                # 检测打架声音
+                if "打架" in result["text"]:
+                    print(f"🔍 检测到打架声音")
+                    # 触发报警
+                    GPIO.output(BUZZER_PIN, GPIO.HIGH)
+                    GPIO.output(LED_PIN, GPIO.HIGH)
+                    time.sleep(2)
+                    GPIO.output(BUZZER_PIN, GPIO.LOW)
+                    GPIO.output(LED_PIN, GPIO.LOW)
+        time.sleep(0.1)
+
+# ===================== 启动程序 =====================
+if __name__ == "__main__":
+    try:
+        detect_fight_sound()
+    except KeyboardInterrupt:
+        print("\n🛑 打架声音识别已停止")
+    except Exception as e:
+        print(f"❌ 程序出错：{e}")
+    finally:
+        # 清理资源
+        stream.stop_stream()
+        stream.close()
+        p.terminate()
+        GPIO.cleanup()
+📋 自定义模型训练方案
+1. 打架动作识别模型训练
+数据准备：
+采集打架动作视频数据，使用OpenCV提取视频帧
+使用LabelStudio标注视频帧中的人体动作
+使用数据增强技术，如旋转、翻转、缩放等，提高模型泛化能力
+模型训练：
+使用YOLOv8训练自定义打架动作识别模型
+调整训练参数，如学习率、批次大小、训练轮数等
+使用模型剪枝和量化技术，减少模型大小和计算量
+模型部署：
+将训练好的模型转换为ONNX格式
+将模型传输到树莓派本地
+测试模型的识别准确率和速度
+2. 打架声音识别模型训练
+数据准备：
+采集打架声音数据，使用pyaudio录制音频
+使用LabelStudio标注音频中的打架声音
+使用数据增强技术，如添加噪声、调整语速等，提高模型泛化能力
+模型训练：
+使用vosk训练自定义打架声音识别模型
+调整训练参数，如学习率、批次大小、训练轮数等
+使用模型剪枝和量化技术，减少模型大小和计算量
+模型部署：
+将训练好的模型传输到树莓派本地
+测试模型的识别准确率和速度
+🎯 项目创新点
+1. 多模态融合识别
+结合动作识别和音频识别，提高打架行为的识别准确率
+使用YOLOv8和vosk实现多模态融合，降低误报率
+2. 纯离线运行
+无需网络和电脑，按下电源按钮即可自动运行
+适合校园等网络条件有限的环境
+3. 自定义模型训练
+项目成员自己训练打架动作识别模型和打架声音识别模型
+完全符合比赛要求的自定义模型训练要求
+4. 低成本实现
+总成本可控制在300元以内，适合学生和预算有限的用户
+使用开源硬件和软件，无需购买商业设备和软件
+📋 比赛准备建议
+1. 项目演示PPT
+封面：项目名称、团队名称、指导教师
+目录：项目背景、技术架构、核心功能、实现方案、创新点、测试结果、总结展望
+内容：详细介绍项目的技术实现和创新点，展示测试结果和演示视频
+结尾：感谢评委和观众，留下联系方式
+2. 项目演示视频
+内容：展示项目的核心功能和报警提示
+时长：控制在5分钟以内
+格式：MP4格式，分辨率1920×1080
+3. 项目代码
+结构：清晰的代码结构，包含注释和文档
+格式：Python代码，符合PEP8规范
+提交：将代码上传到GitHub或GitLab，提供项目链接

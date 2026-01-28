@@ -1,18 +1,23 @@
-import whisper
 import sounddevice as sd
 import numpy as np
 import threading
 import queue
+import torch
+from transformers import AutoProcessor, AutoModelForSpeechSeq2Seq
 
 # ===================== 核心配置（极简） =====================
-SAMPLING_RATE = 16000  # Whisper固定要求16000采样率
-CHUNK_DURATION = 60     # 每2秒转写一次（可调，越小越实时）
-MODEL = "small"         # 模型大小：tiny(最快)/base(平衡)/small(更准)
+SAMPLING_RATE = 16000  # Qwen3-ASR-Flash固定要求16000采样率
+CHUNK_DURATION = 2     # 每2秒转写一次（可调，越小越实时）
+MODEL_NAME = "Qwen/Qwen3-ASR-Flash"
 LANGUAGE = "zh"        # 指定中文转写，提升准确率
 
 # ===================== 初始化 =====================
-# 加载模型（首次运行自动下载到本地，路径：~/.cache/whisper）
-model = whisper.load_model(MODEL, device="cpu")  # 强制CPU，避免GPU依赖
+# 加载Qwen3-ASR-Flash模型和处理器
+print(f"正在加载{MODEL_NAME}模型...")
+processor = AutoProcessor.from_pretrained(MODEL_NAME)
+model = AutoModelForSpeechSeq2Seq.from_pretrained(MODEL_NAME)
+model.eval()  # 设置为评估模式
+
 # 音频队列：存储采集的音频数据
 audio_queue = queue.Queue()
 
@@ -21,7 +26,7 @@ def collect_audio(indata, frames, time, status):
     """麦克风采集回调，直接存原始音频数据"""
     if status:
         print(f"采集提示：{status}", flush=True)
-    # 转换为Whisper要求的格式（单声道、float32）
+    # 转换为Qwen3-ASR-Flash要求的格式（单声道、float32）
     audio_data = indata[:, 0].astype(np.float32)
     audio_queue.put(audio_data)
 
@@ -45,19 +50,18 @@ def transcribe_real_time():
         
         # 转写有效音频
         if audio_chunks:
-            # 拼接并归一化（Whisper必需步骤）
+            # 拼接并归一化（Qwen3-ASR-Flash必需步骤）
             audio = np.concatenate(audio_chunks)
             audio = audio / np.max(np.abs(audio)) if np.max(np.abs(audio)) > 0 else audio
             
-            # 核心转写：直接处理原始音频数组，无需ffmpeg解码
-            result = model.transcribe(
-                audio,
-                language=LANGUAGE,
-                fp16=False,  # 关闭半精度，适配CPU
-                verbose=False  # 关闭冗余日志
-            )
-            if result["text"].strip():
-                print(f"📝 转写结果：{result['text']}")
+            # 核心转写：使用Qwen3-ASR-Flash模型
+            inputs = processor(audio, sampling_rate=SAMPLING_RATE, return_tensors="pt")
+            with torch.no_grad():
+                outputs = model.generate(**inputs)
+            result_text = processor.decode(outputs[0], skip_special_tokens=True)
+            
+            if result_text.strip():
+                print(f"📝 转写结果：{result_text}")
 
 # ===================== 启动程序 =====================
 if __name__ == "__main__":
