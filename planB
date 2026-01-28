@@ -1,0 +1,295 @@
+项目名称：医院智能导诊与安全监护助手
+核心定位：
+以智慧医疗为应用场景，具身智能为技术核心，打造一款可部署在医院门诊大厅、病房走廊的智能导诊与安全监护设备，实现：
+
+语音触发导诊服务
+腕带颜色识别区分患者类型
+药品识别+取药引导
+摔倒/跌倒动作识别+紧急报警（针对患者/家属在医院内摔倒的情况）
+📖 项目背景更新（完全贴合医院场景）
+在医院日常运营中，医护人员经常面临以下痛点：
+
+患者分流效率低：门诊大厅人流量大，无法快速区分急症患者、慢性病患者和普通患者
+安全监护不到位：病房走廊、楼梯间等区域容易发生患者/家属摔倒的情况，无法及时发现和救助
+取药引导不精准：患者取药时容易找错窗口或药品，增加医护人员的工作负担
+信息沟通成本高：需要反复询问患者病情、用药情况和过敏史
+为了解决这些问题，我们设计了这款医院智能导诊与安全监护助手，通过多模态人工智能技术，实现：
+
+精准患者分流：通过腕带颜色识别区分患者类型，提供个性化导诊服务
+实时安全监护：通过摔倒动作识别技术，及时发现和救助摔倒的患者/家属
+智能取药引导：通过药品识别技术，引导患者快速找到正确的取药窗口和药品
+便捷语音交互：通过语音识别技术，实现无需触摸的导诊服务
+🛠️ 硬件清单（无需更改）
+设备名称	具体型号	信号参数	价格（元）	功能描述	优化建议
+树莓派	Raspberry Pi 3B+	四核ARM Cortex-A53 @1.4GHz，1GB RAM，4×USB，GPIO接口	199	系统主机，运行所有程序	二手平台淘取约150元
+USB麦克风	普通USB语音麦克风	采样率16kHz，单声道	20	采集语音指令	用手机耳机麦克风替代（节省20元）
+USB摄像头	720P高清摄像头	分辨率1280×720，30fps	50	采集图像用于识别（腕带颜色/药品/摔倒动作）	用旧手机摄像头替代（节省50元）
+LED警示灯	红/黄/绿/蓝LED模块	工作电压3.3V/5V，GPIO接口	10	对应腕带颜色的状态提示+紧急报警	用普通LED灯替代（节省10元）
+无源蜂鸣器	蜂鸣器模块	工作电压3.3V/5V，GPIO接口	5	语音交互反馈+紧急报警	用无源蜂鸣器替代有源蜂鸣器（节省5元）
+电源	树莓派官方电源	5V/2.5A，Micro USB接口	20	为树莓派供电	用手机充电器替代（节省20元）
+存储	16GB Micro SD卡	UHS-I Class10，读速95MB/s	20	存储系统和数据	用闲置SD卡替代（节省20元）
+总计			324		优化后最低成本约155元
+🚀 核心功能实现更新（摔倒检测完全贴合医院场景）
+1. 语音互动（硬性要求）
+触发关键词："导诊助手"
+实现逻辑：
+使用vosk离线语音识别库，无需网络
+提前录制关键词"导诊助手"的语音样本，训练自定义识别模型
+检测到关键词后，语音回复"您好，请问需要导诊服务还是安全监护？"
+支持语音查询科室位置、取药窗口、紧急求助等功能
+代码示例：
+python
+复制
+from vosk import Model, KaldiRecognizer
+import pyaudio
+import json
+import time
+
+# 加载自定义关键词模型
+model = Model("zh-cn-tdnn-fbank-small")
+rec = KaldiRecognizer(model, 16000)
+
+# 初始化音频流
+p = pyaudio.PyAudio()
+stream = p.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True, frames_per_buffer=8000)
+
+print("等待关键词触发...")
+while True:
+    data = stream.read(4000)
+    if rec.AcceptWaveform(data):
+        result = json.loads(rec.Result())
+        if "导诊助手" in result["text"]:
+            print("检测到关键词：导诊助手")
+            # 播放回复语音
+            # os.system("aplay reply.wav")
+            print("您好，请问需要导诊服务还是安全监护？")
+            # 等待用户选择
+            time.sleep(5)
+            # 这里可以添加语音识别用户选择的逻辑
+    time.sleep(0.1)
+2. 图像识别（硬性要求：2类，选择颜色识别和文字识别）
+✅ 第一类：颜色识别（腕带颜色识别）
+功能描述：识别患者手腕上的腕带颜色，区分患者类型，提供精准导诊服务
+实现逻辑：
+使用OpenCV的颜色空间转换技术，识别腕带的颜色
+预设4种颜色对应的患者类型：红色（急症）、黄色（慢性病）、绿色（普通）、蓝色（过敏）
+识别到腕带颜色后，语音回复导诊建议，并点亮对应颜色的LED灯
+代码示例：
+python
+复制
+import cv2
+import numpy as np
+import RPi.GPIO as GPIO
+
+# 初始化GPIO
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(18, GPIO.OUT)  # 红色LED
+GPIO.setup(23, GPIO.OUT)  # 黄色LED
+GPIO.setup(24, GPIO.OUT)  # 绿色LED
+GPIO.setup(25, GPIO.OUT)  # 蓝色LED
+
+# 定义颜色范围（HSV）
+color_ranges = {
+    "red": [(0, 120, 70), (10, 255, 255)],
+    "yellow": [(20, 100, 100), (30, 255, 255)],
+    "green": [(40, 40, 40), (70, 255, 255)],
+    "blue": [(90, 40, 40), (130, 255, 255)]
+}
+
+# 初始化摄像头
+cap = cv2.VideoCapture(0)
+
+def recognize_wristband_color():
+    """识别腕带颜色并提供导诊服务"""
+    print("请出示您的腕带...")
+    start_time = time.time()
+    while time.time() - start_time < 10:  # 10秒超时
+        ret, frame = cap.read()
+        if not ret:
+            break
+        # 转换为HSV颜色空间
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        # 遍历颜色范围
+        for color, (lower, upper) in color_ranges.items():
+            lower = np.array(lower, dtype=np.uint8)
+            upper = np.array(upper, dtype=np.uint8)
+            # 创建掩膜
+            mask = cv2.inRange(hsv, lower, upper)
+            # 计算掩膜面积
+            area = cv2.countNonZero(mask)
+            if area > 1000:  # 颜色区域足够大
+                print(f"识别到{color}腕带")
+                # 点亮对应颜色的LED灯
+                GPIO.output(18, GPIO.HIGH if color == "red" else GPIO.LOW)
+                GPIO.output(23, GPIO.HIGH if color == "yellow" else GPIO.LOW)
+                GPIO.output(24, GPIO.HIGH if color == "white" else GPIO.LOW)
+                GPIO.output(25, GPIO.HIGH if color == "blue" else GPIO.LOW)
+                # 提供导诊建议
+                if color == "red":
+                    print("您是急症患者，请前往急症室优先就诊")
+                    # os.system("aplay red.wav")
+                elif color == "yellow":
+                    print("您是慢性病患者，请前往慢性病专科就诊")
+                    # os.system("aplay yellow.wav")
+                elif color == "white":
+                    print("您是普通患者，请前往普通门诊就诊")
+                    # os.system("aplay white.wav")
+                elif color == "blue":
+                    print("您是过敏体质患者，请提醒医护人员注意用药安全")
+                    # os.system("aplay blue.wav")
+                # 保持LED灯亮5秒
+                time.sleep(5)
+                # 关闭所有LED灯
+                GPIO.output(18, GPIO.LOW)
+                GPIO.output(23, GPIO.LOW)
+                GPIO.output(24, GPIO.LOW)
+                GPIO.output(25, GPIO.LOW)
+                return
+        cv2.imshow('frame', frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+    print("未识别到腕带颜色，请重新尝试")
+✅ 第二类：文字识别（药品标签识别）
+功能描述：识别药品包装上的文字，引导患者取药
+实现逻辑：
+使用pytesseract离线文字识别库
+提前采集医院常用药品的标签图片，训练自定义识别模型
+识别到药品名称后，语音回复"请前往第X取药窗口取药"
+代码示例：
+python
+复制
+import cv2
+import pytesseract
+
+# 初始化摄像头
+cap = cv2.VideoCapture(0)
+
+def recognize_medicine():
+    """识别药品标签并提供取药引导"""
+    print("请出示药品标签...")
+    start_time = time.time()
+    while time.time() - start_time < 10:  # 10秒超时
+        ret, frame = cap.read()
+        if not ret:
+            break
+        # 识别文字
+        text = pytesseract.image_to_string(frame, lang='chi_sim')
+        if text.strip():
+            print(f"识别到药品：{text.strip()}")
+            # 根据药品名称提供取药引导
+            if "感冒灵颗粒" in text:
+                print("请前往第1取药窗口取药")
+                # os.system("aplay cold.wav")
+            elif "降压药" in text:
+                print("请前往第2取药窗口取药")
+                # os.system("aplay blood_pressure.wav")
+            elif "创可贴" in text:
+                print("请前往第3取药窗口取药")
+                # os.system("aplay bandage.wav")
+            return
+        cv2.imshow('frame', frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+    print("未识别到药品标签，请重新尝试")
+3. 摔倒/跌倒动作识别（贴合医院场景的核心功能）
+功能描述：识别患者/家属在医院内摔倒/跌倒的动作，触发紧急报警，通知医护人员及时救助
+应用场景：
+门诊大厅、病房走廊、楼梯间等容易发生摔倒的区域
+针对老年人、孕妇、术后患者等容易摔倒的人群
+实现逻辑：
+使用Teachable Machine训练自定义摔倒/跌倒动作识别模型
+将模型转换为TensorFlow Lite格式，部署到树莓派
+检测到摔倒/跌倒动作后，触发红色LED灯和蜂鸣器报警，并语音播报"紧急情况，有人摔倒，请医护人员立即前往救助"
+代码示例：
+python
+复制
+import cv2
+import numpy as np
+import tflite_runtime.interpreter as tflite
+import RPi.GPIO as GPIO
+
+# 初始化GPIO
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(18, GPIO.OUT)  # 红色LED
+GPIO.setup(26, GPIO.OUT)  # 蜂鸣器
+
+# 加载自定义摔倒动作识别模型
+interpreter = tflite.Interpreter(model_path="fall_detection.tflite")
+interpreter.allocate_tensors()
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
+# 初始化摄像头
+cap = cv2.VideoCapture(0)
+
+def detect_fall():
+    """实时检测摔倒/跌倒动作"""
+    print("开始摔倒动作检测...")
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        # 预处理图像
+        frame = cv2.resize(frame, (224, 224))
+        frame = frame / 255.0
+        frame = np.expand_dims(frame, axis=0)
+        frame = frame.astype(np.float32)
+        # 模型推理
+        interpreter.set_tensor(input_details[0]['index'], frame)
+        interpreter.invoke()
+        output_data = interpreter.get_tensor(output_details[0]['index'])
+        # 检测摔倒动作
+        if output_data[0][0] > 0.8:
+            print("检测到摔倒动作！")
+            # 触发报警
+            GPIO.output(18, GPIO.HIGH)
+            GPIO.output(26, GPIO.HIGH)
+            # 语音播报紧急情况
+            print("紧急情况，有人摔倒，请医护人员立即前往救助")
+            # os.system("aplay emergency.wav")
+            time.sleep(10)
+            GPIO.output(18, GPIO.LOW)
+            GPIO.output(26, GPIO.LOW)
+        cv2.imshow('frame', frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+4. 自主训练模型（硬性要求）
+训练工具：Google Teachable Machine（无需代码，可视化操作）
+训练数据：
+摔倒动作识别：采集100张正常行走/站立图片+100张摔倒/跌倒图片（在医院场景下拍摄）
+药品识别：采集医院常用药品的标签图片各50张
+训练步骤：
+打开Teachable Machine官网：https://teachablemachine.withgoogle.com/
+选择"Image Project"，创建两个类别："正常"和"摔倒"
+上传采集的图片，点击"Train Model"
+训练完成后，导出为"TensorFlow Lite"格式
+将模型文件传输到树莓派本地
+📋 比赛材料准备更新
+1. 项目研究报告更新
+摘要：加入医院场景下摔倒检测的功能描述
+引言：分析医院内患者/家属摔倒事件频发的痛点
+研究问题与假设：提出"摔倒动作识别能否提高医院内紧急救助的效率？"的假设
+方法：详细说明摔倒动作识别的技术实现和数据采集过程（在医院场景下拍摄图片）
+结果：用图表展示摔倒动作识别的准确率和紧急救助时间缩短情况
+讨论：分析摔倒动作识别的误差来源和改进方向
+2. 演示视频更新
+内容：增加医院场景下摔倒检测的演示环节（可以在学校模拟医院场景拍摄）
+时长：控制在4分钟以内
+格式：MP4格式，H.264编码，文件大小不超过400MB
+3. 演示文档更新
+功能说明：详细介绍摔倒动作识别的功能和实现逻辑（贴合医院场景）
+电路搭建图：更新LED灯和蜂鸣器的连接方式
+程序代码：提供摔倒动作识别的核心代码片段
+🎯 项目创新点更新（比赛加分项）
+多模态融合：结合语音识别、颜色识别、文字识别和动作识别，实现更全面的导诊与安全监护服务
+精准患者分流：通过腕带颜色识别技术，实现患者类型的快速区分和精准导诊
+实时安全监护：通过摔倒动作识别技术，及时发现和救助摔倒的患者/家属
+纯离线运行：所有模型和算法均部署在本地，无需网络支持
+低成本实现：总成本可控制在300元以内，适合医院和预算有限的用户
+医院场景适配：针对医院场景设计，解决实际问题
+自主模型训练：项目成员自己训练摔倒动作识别和药品识别模型，符合比赛要求
+📋 现场展示建议更新
+硬件展示：将所有硬件集成在一个3D打印的外壳中，制作成一个美观的设备，展示4种颜色的LED灯和蜂鸣器
+功能演示：现场演示语音触发导诊、腕带颜色识别、药品识别和摔倒动作识别功能（可以模拟医院场景）
+模型讲解：展示模型训练的过程和数据，说明模型的准确率和泛化能力
+互动环节：邀请评委和观众佩戴不同颜色的腕带，体验腕带颜色识别功能；模拟摔倒动作，体验摔倒检测功能
